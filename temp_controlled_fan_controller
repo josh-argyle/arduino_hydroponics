@@ -1,0 +1,127 @@
+// // Fan speed controller
+
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+// Data wire is plugged into port 2 on the Arduino
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 32 // OLED display height, in pixels
+
+#define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// For PWM
+#define ONE_WIRE_BUS 3
+
+// Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
+OneWire oneWire(ONE_WIRE_BUS);
+
+// Pass our oneWire reference to Dallas Temperature. 
+DallasTemperature sensors(&oneWire);
+
+const int fan_control_pin = 9; //Blue Wire on Fan (about 25kHz PWM)
+int count = 0;
+unsigned long start_time;
+int rpm;
+float tempC = 0;
+
+void setup() {
+  // Start up the temperature sensor.
+  sensors.begin();
+
+  TCCR1A = 0; // undo the configuration done by...
+  TCCR1B = 0; // ...the Arduino core library
+  TCNT1 = 0; // reset timer
+  TCCR1A = _BV(COM1A1) | _BV(COM1B1) | _BV(WGM11); //Undo default timers
+  TCCR1B = _BV(WGM13) | _BV(CS10); //for pins 9 & 10
+  ICR1 = 320; // PWM will be 0 to 320 instead of 0 to 255
+  pinMode( fan_control_pin, OUTPUT);
+  OCR1A = 0; //set pwm to 0 out of 320 on pin 9
+  OCR1B = 0; //set pwm to 0 out of 320 on pin 10
+  Serial.begin(9600);
+  Serial.println("Starting....");
+  attachInterrupt(digitalPinToInterrupt(3), counter, RISING); //Yellow Wire with 5V pullup
+
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+  if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;); // Don't proceed, loop forever
+  }
+
+  // Dont immediately start the fan.
+  delay(100);
+  start_time = millis();
+  count = 0;
+  while((millis() - start_time) < 1000){
+    // Do nothing
+  }  
+}
+
+void loop() {
+
+  // Check temperature probe
+
+  sensors.requestTemperatures();
+  tempC = sensors.getTempCByIndex(0);
+
+  // Check if reading was successful
+  if(tempC != DEVICE_DISCONNECTED_C) 
+  {
+    Serial.print("Temperature is: ");
+    Serial.println(tempC);
+  } 
+  else
+  {
+    Serial.println("Error: Could not read temperature data");
+  }
+
+  // Temperature. 
+  // If it is below 20, pwm = 0
+  // Over 25 pwm = 100
+
+  int pwm = 0;
+
+  if (tempC < 20.0) {
+    pwm = 0;
+  } else if (tempC < 22.0) {
+    pwm = 64;
+  } else if (tempC < 23.0) {
+    pwm = 128;
+  } else if (tempC < 24.0) {
+    pwm = 192;
+  } else if (tempC < 25.0) {
+    pwm = 256;
+  } else {
+    pwm = 320;
+  }
+
+  // Write the PWM value to the pin.
+  OCR1A = pwm;
+  Serial.print("PWM: ");
+  Serial.println(pwm);
+  displayTDS();
+}
+
+void displayTDS() {
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 12);
+  display.cp437(true);         // Use full 256 char 'Code Page 437' font
+
+  display.print(tempC, 1);
+  display.write(" ");
+  display.write(248);
+  display.write("C");
+  display.display();
+}
+
+void counter() {
+  count++;
+}
